@@ -4,7 +4,6 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 const displayPrimary = ref('0')
 const displaySecondary = ref('')
 const expression = ref<string>('')
-const memory = ref<number | null>(null)
 const hasError = ref(false)
 
 const maxDigits = 16
@@ -53,8 +52,9 @@ function toggleSign() {
   if (hasError.value) return
   if (displayPrimary.value.startsWith('-')) {
     displayPrimary.value = displayPrimary.value.slice(1)
-  } else if (displayPrimary.value !== '0') {
-    displayPrimary.value = '-' + displayPrimary.value
+  } else {
+    if (displayPrimary.value === '0') displayPrimary.value = '-0'
+    else displayPrimary.value = '-' + displayPrimary.value
   }
 }
 
@@ -123,27 +123,23 @@ function tokenize(s: string): Tok[] {
       if (ch === '/') op = '÷'
       out.push({ type: 'op', v: op }); i++; continue
     }
-    if (/[0-9.]/.test(ch)) {
+    if (/[0-9.\-]/.test(ch)) {
       let j = i
       let dot = 0
-      while (j < s.length && /[0-9.]/.test(s[j])) { if (s[j] === '.') dot++; if (dot > 1) break; j++ }
+      let sawMinus = false
+      while (j < s.length && /[0-9.\-]/.test(s[j])) {
+        if (s[j] === '.') { dot++; if (dot > 1) break }
+        if (s[j] === '-') { if (j !== i) break; sawMinus = true }
+        j++
+      }
       out.push({ type: 'num', v: s.slice(i, j) })
       i = j
       continue
     }
     throw new Error('bad token')
   }
-  // handle unary minus
-  const norm: Tok[] = []
-  for (let k = 0; k < out.length; k++) {
-    const t = out[k]
-    if (t.type === 'op' && t.v === '-' && (k === 0 || ['op','lpar'].includes(out[k-1].type))) {
-      // convert "-x" to "0 - x"
-      norm.push({ type: 'num', v: '0' })
-      norm.push(t)
-    } else norm.push(t)
-  }
-  return norm
+  // allow unary minus as part of number when typed (handled at input time)
+  return out
 }
 
 const prec: Record<string, number> = { '+':1, '-':1, '×':2, '÷':2 }
@@ -217,48 +213,43 @@ function memorySub() { const n = Number(displayPrimary.value); if (Number.isFini
 </script>
 
 <template>
-  <div class="min-h-dvh flex items-center justify-center p-4 bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-950">
-    <UCard class="w-full max-w-[380px] shadow-2xl/50 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-slate-900/60">
-      <div class="flex flex-col gap-2">
-        <div class="text-right select-none">
-          <div class="text-sm text-slate-500 dark:text-slate-400 h-5 truncate" aria-live="polite">{{ displaySecondary }}</div>
-          <div class="text-4xl font-semibold tabular-nums h-[44px] overflow-hidden" aria-live="polite">{{ displayPrimary }}</div>
+  <div class="min-h-dvh flex items-center justify-center p-6 bg-black text-white">
+    <div class="w-full max-w-[380px] rounded-2xl border border-white/10 bg-black/60 backdrop-blur">
+      <div class="p-5 flex flex-col gap-4">
+        <div class="select-none text-right">
+          <div class="text-xs text-white/40 h-4 truncate" aria-live="polite">{{ displaySecondary }}</div>
+          <div class="text-5xl font-semibold h-[52px] overflow-hidden tracking-tight" aria-live="polite">{{ displayPrimary }}</div>
         </div>
         <div class="grid grid-cols-4 gap-2">
-          <UButton color="gray" variant="soft" @click="memoryClear" :aria-label="'Memory Clear'">MC</UButton>
-          <UButton color="gray" variant="soft" @click="memoryRecall" :aria-label="'Memory Recall'">MR</UButton>
-          <UButton color="gray" variant="soft" @click="memoryAdd" :aria-label="'Memory Add'">M+</UButton>
-          <UButton color="gray" variant="soft" @click="memorySub" :aria-label="'Memory Subtract'">M-</UButton>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="percent" aria-label="Percent">%</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="clearEntry" aria-label="Clear Entry">CE</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="resetAll" aria-label="All Clear">AC</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="backspace" aria-label="Backspace">⌫</button>
 
-          <UButton color="gray" variant="soft" @click="percent" :aria-label="'Percent'">%</UButton>
-          <UButton color="gray" variant="soft" @click="clearEntry" :aria-label="'Clear Entry'">CE</UButton>
-          <UButton color="gray" variant="soft" @click="resetAll" :aria-label="'Clear'">C</UButton>
-          <UButton color="gray" variant="soft" @click="backspace" :aria-label="'Backspace'">⌫</UButton>
+          <button class="h-11 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-400 cursor-pointer" @click="opKey('÷')">÷</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('7')">7</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('8')">8</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('9')">9</button>
 
-          <UButton @click="opKey('÷')" color="primary" variant="soft">÷</UButton>
-          <UButton @click="inputDigit('7')">7</UButton>
-          <UButton @click="inputDigit('8')">8</UButton>
-          <UButton @click="inputDigit('9')">9</UButton>
+          <button class="h-11 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-400 cursor-pointer" @click="opKey('×')">×</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('4')">4</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('5')">5</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('6')">6</button>
 
-          <UButton @click="opKey('×')" color="primary" variant="soft">×</UButton>
-          <UButton @click="inputDigit('4')">4</UButton>
-          <UButton @click="inputDigit('5')">5</UButton>
-          <UButton @click="inputDigit('6')">6</UButton>
+          <button class="h-11 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-400 cursor-pointer" @click="opKey('-')">−</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('1')">1</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('2')">2</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('3')">3</button>
 
-          <UButton @click="opKey('-')" color="primary" variant="soft">−</UButton>
-          <UButton @click="inputDigit('1')">1</UButton>
-          <UButton @click="inputDigit('2')">2</UButton>
-          <UButton @click="inputDigit('3')">3</UButton>
+          <button class="h-11 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-400 cursor-pointer" @click="opKey('+')">+</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="toggleSign">±</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDigit('0')">0</button>
+          <button class="h-11 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 cursor-pointer" @click="inputDot">.</button>
 
-          <UButton @click="opKey('+')" color="primary" variant="soft">+</UButton>
-          <UButton @click="toggleSign" color="gray" variant="soft">±</UButton>
-          <UButton @click="inputDigit('0')">0</UButton>
-          <UButton @click="inputDot">.</UButton>
-
-          <UButton class="col-span-4" color="primary" @click="computeEquals">=</UButton>
+          <button class="h-12 rounded-xl col-span-4 bg-orange-500 hover:bg-orange-400 text-black border border-orange-500/50 font-semibold cursor-pointer" @click="computeEquals">=</button>
         </div>
       </div>
-    </UCard>
+    </div>
   </div>
 </template>
 

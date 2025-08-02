@@ -2,5 +2,7 @@
 </script>
 
 <template>
-  <Calculator />
+  <main class="min-h-dvh bg-black text-white">
+    <Calculator />
+  </main>
 </template>
