@@ -2,7 +2,5 @@
 </script>
 
 <template>
-  <UApp>
-    <NuxtPage />
-  </UApp>
+  <Calculator />
 </template>
